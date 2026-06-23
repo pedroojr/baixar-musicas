@@ -37,7 +37,7 @@ from urllib.parse import urlencode, urlparse
 # ----------------------------------------------------------------------------
 HOST = os.environ.get("BAIXAR_HOST", "127.0.0.1")   # 0.0.0.0 no servidor/Docker
 PORT = int(os.environ.get("BAIXAR_PORT", "8420"))
-VERSAO = "2.2"  # incrementar a cada alteração
+VERSAO = "2.3"  # incrementar a cada alteração
 # Login: se BAIXAR_SENHA estiver definida (no servidor), exige usuário+senha.
 # Local (sem a variável) continua sem senha.
 LOGIN_USUARIO = os.environ.get("BAIXAR_USUARIO", "realce")
@@ -45,6 +45,8 @@ LOGIN_SENHA = os.environ.get("BAIXAR_SENHA", "")
 EXIGE_LOGIN = bool(LOGIN_SENHA)
 # Modo online: esconde "Salvar no Mac" (não faz sentido em servidor remoto).
 MODO_ONLINE = os.environ.get("BAIXAR_ONLINE", "") == "1"
+# Prefixo de caminho quando servido sob uma subpasta (ex: "/Baixar"). Vazio = raiz.
+BASE_PATH = os.environ.get("BAIXAR_BASE_PATH", "").rstrip("/")
 PASTA_DOWNLOADS = Path.home() / "Downloads" / "Baixar Musicas"
 PASTA_APP = Path(__file__).resolve().parent
 # Cache PERMANENTE dos áudios de prévia (pré-escuta). Fica salvo até você limpar.
@@ -1146,10 +1148,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _rotear_get(self):
         rota = urlparse(self.path).path
+        if BASE_PATH and rota.startswith(BASE_PATH):
+            rota = rota[len(BASE_PATH):] or "/"
 
         if rota == "/":
             corpo = (HTML.replace("{{VERSAO}}", VERSAO)
-                         .replace("{{ONLINE}}", "1" if MODO_ONLINE else "")).encode("utf-8")
+                         .replace("{{ONLINE}}", "1" if MODO_ONLINE else "")
+                         .replace("{{BASE}}", BASE_PATH)).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
@@ -1248,6 +1253,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _rotear_post(self):
         rota = urlparse(self.path).path
+        if BASE_PATH and rota.startswith(BASE_PATH):
+            rota = rota[len(BASE_PATH):] or "/"
 
         if rota.startswith("/cancelar/"):
             job_id = rota.rsplit("/", 1)[-1]
@@ -1873,6 +1880,18 @@ HTML = r"""<!DOCTYPE html>
 </div>
 
 <script>
+// Prefixo quando o app é servido sob uma subpasta (ex: /Baixar). Prefixa
+// automaticamente todo fetch/EventSource e os players de áudio.
+const BASE = "{{BASE}}";
+(function () {
+  const pfx = (u) => (typeof u === "string" && u.charAt(0) === "/") ? BASE + u : u;
+  const _f = window.fetch;
+  window.fetch = (u, o) => _f(pfx(u), o);
+  const _ES = window.EventSource;
+  window.EventSource = function (u, o) { return new _ES(pfx(u), o); };
+  window.__pfx = pfx;
+})();
+
 let formato = "mp3";
 let escopo = "musica";
 
@@ -2010,7 +2029,7 @@ function tocarPrevia(url, btn) {
     `<audio class="player" controls autoplay></audio>`;
   const a = ytPlayer.querySelector("audio");
   const msg = document.getElementById("previaMsg");
-  a.src = "/previa-audio?url=" + encodeURIComponent(url);
+  a.src = BASE + "/previa-audio?url=" + encodeURIComponent(url);
   a.oncanplay = () => { msg.textContent = "🔊 Tocando prévia"; btn.textContent = "▶"; };
   a.onerror = () => {
     msg.innerHTML = "<span class='bad'>Não consegui pré-ouvir essa música.</span>";
@@ -2321,7 +2340,7 @@ async function carregarArquivosRadio() {
       `<button class="btnIcon del" title="Excluir da rádio">🗑</button>`;
     row.querySelector(".tit").textContent = nome;
     row.querySelector(".play").onclick = () => {
-      audioPlayer.src = `/radio/play?estacao=${est}&id=${a.id}`;
+      audioPlayer.src = BASE + `/radio/play?estacao=${est}&id=${a.id}`;
       audioPlayer.classList.remove("hide");
       audioPlayer.play();
     };
@@ -2576,7 +2595,7 @@ document.getElementById("btnGerarTTS").onclick = async () => {
   if (!d.ok) { ttsMsg.textContent = d.erro || "Falhou."; ttsMsg.className = "dica bad"; return; }
   ttsIdAtual = d.id;
   mostrarCreditos(d.creditos);
-  document.getElementById("ttsPlayer").src = "/tts/audio?id=" + d.id;
+  document.getElementById("ttsPlayer").src = BASE + "/tts/audio?id=" + d.id;
   document.getElementById("ttsResultado").classList.remove("hide");
   if (!document.getElementById("ttsNome").value)
     document.getElementById("ttsNome").value = texto.slice(0, 30).replace(/[^\w áéíóúâêôãõç-]/gi, "").trim() || "vinheta";
@@ -2591,7 +2610,7 @@ document.getElementById("btnSpot").onclick = async () => {
   if (d.ok) {
     ttsIdAtual = d.id;
     const p = document.getElementById("ttsPlayer");
-    p.src = "/tts/audio?id=" + d.id; p.load();
+    p.src = BASE + "/tts/audio?id=" + d.id; p.load();
     ttsMsg.textContent = "✅ Spot com música de fundo pronto! Ouça acima."; ttsMsg.className = "dica ok";
   } else if (d.cancelado) { ttsMsg.textContent = "Cancelado."; ttsMsg.className = "dica"; }
   else { ttsMsg.textContent = d.erro || "Falhou."; ttsMsg.className = "dica bad"; }
