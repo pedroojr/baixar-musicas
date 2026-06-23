@@ -37,7 +37,7 @@ from urllib.parse import urlencode, urlparse
 # ----------------------------------------------------------------------------
 HOST = os.environ.get("BAIXAR_HOST", "127.0.0.1")   # 0.0.0.0 no servidor/Docker
 PORT = int(os.environ.get("BAIXAR_PORT", "8420"))
-VERSAO = "2.3"  # incrementar a cada alteração
+VERSAO = "2.4"  # incrementar a cada alteração
 # Login: se BAIXAR_SENHA estiver definida (no servidor), exige usuário+senha.
 # Local (sem a variável) continua sem senha.
 LOGIN_USUARIO = os.environ.get("BAIXAR_USUARIO", "realce")
@@ -1181,10 +1181,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if rota == "/radio/config":
             # Estado da configuração (não devolve a key inteira, só se existe).
+            _k = CONFIG.get("api_key", "")
             cfg = {
-                "tem_key": bool(CONFIG.get("api_key")),
+                "tem_key": bool(_k),
                 "base_url": CONFIG.get("base_url", ""),
-                "estacoes": listar_estacoes() if CONFIG.get("api_key") else [],
+                "estacoes": listar_estacoes() if _k else [],
+                "dbg": {"len": len(_k), "ini": _k[:6], "fim": _k[-6:], "tem_dp": ":" in _k},
             }
             self._enviar(200, "application/json", json.dumps(cfg).encode())
             return
