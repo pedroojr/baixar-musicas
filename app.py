@@ -37,12 +37,13 @@ from urllib.parse import urlencode, urlparse
 # ----------------------------------------------------------------------------
 HOST = os.environ.get("BAIXAR_HOST", "127.0.0.1")   # 0.0.0.0 no servidor/Docker
 PORT = int(os.environ.get("BAIXAR_PORT", "8420"))
-VERSAO = "2.6"  # incrementar a cada alteração
+VERSAO = "2.7"  # incrementar a cada alteração
 # Login: se BAIXAR_SENHA estiver definida (no servidor), exige usuário+senha.
 # Local (sem a variável) continua sem senha.
 LOGIN_USUARIO = os.environ.get("BAIXAR_USUARIO", "realce")
 LOGIN_SENHA = os.environ.get("BAIXAR_SENHA", "")
 EXIGE_LOGIN = bool(LOGIN_SENHA)
+SESSOES = set()  # tokens de sessão válidos (login por cookie, não popup do navegador)
 # Modo online: esconde "Salvar no Mac" (não faz sentido em servidor remoto).
 MODO_ONLINE = os.environ.get("BAIXAR_ONLINE", "") == "1"
 # Prefixo de caminho quando servido sob uma subpasta (ex: "/Baixar"). Vazio = raiz.
@@ -1104,28 +1105,14 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def _checar_login(self):
-        """Se EXIGE_LOGIN, valida usuário+senha (HTTP Basic). Retorna True se ok."""
+    def _autenticado(self):
+        """True se não exige login OU se tem cookie de sessão válido."""
         if not EXIGE_LOGIN:
             return True
-        auth = self.headers.get("Authorization", "")
-        if auth.startswith("Basic "):
-            try:
-                usr, pwd = base64.b64decode(auth[6:]).decode("utf-8").split(":", 1)
-                if usr == LOGIN_USUARIO and pwd == LOGIN_SENHA:
-                    return True
-            except Exception:  # noqa: BLE001
-                pass
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="Baixar Musicas"')
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-        return False
+        m = re.search(r"sessao=([a-f0-9]+)", self.headers.get("Cookie", ""))
+        return bool(m and m.group(1) in SESSOES)
 
     def do_GET(self):
-        if not self._checar_login():
-            return
         try:
             self._rotear_get()
         except Exception as e:  # noqa: BLE001
@@ -1137,8 +1124,6 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def do_POST(self):
-        if not self._checar_login():
-            return
         try:
             self._rotear_post()
         except Exception as e:  # noqa: BLE001
@@ -1153,6 +1138,20 @@ class Handler(BaseHTTPRequestHandler):
         rota = urlparse(self.path).path
         if BASE_PATH and rota.startswith(BASE_PATH):
             rota = rota[len(BASE_PATH):] or "/"
+
+        # Não logado: a raiz mostra a tela de login; o resto é bloqueado.
+        if not self._autenticado():
+            if rota == "/":
+                corpo = LOGIN_HTML.replace("{{BASE}}", BASE_PATH).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(corpo)))
+                self.end_headers()
+                self.wfile.write(corpo)
+                return
+            self._enviar(401, "application/json", json.dumps({"erro": "Faça login."}).encode())
+            return
 
         if rota == "/":
             corpo = (HTML.replace("{{VERSAO}}", VERSAO)
@@ -1257,6 +1256,30 @@ class Handler(BaseHTTPRequestHandler):
         rota = urlparse(self.path).path
         if BASE_PATH and rota.startswith(BASE_PATH):
             rota = rota[len(BASE_PATH):] or "/"
+
+        if rota == "/login":
+            tamanho = int(self.headers.get("Content-Length", 0))
+            dados = json.loads(self.rfile.read(tamanho) or b"{}")
+            usr = (dados.get("usuario") or "").strip()
+            pwd = dados.get("senha") or ""
+            if usr == LOGIN_USUARIO and pwd == LOGIN_SENHA:
+                token = uuid.uuid4().hex
+                SESSOES.add(token)
+                corpo = json.dumps({"ok": True}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie",
+                                 f"sessao={token}; Path={BASE_PATH or '/'}; HttpOnly; SameSite=Lax; Max-Age=2592000")
+                self.send_header("Content-Length", str(len(corpo)))
+                self.end_headers()
+                self.wfile.write(corpo)
+            else:
+                self._enviar(200, "application/json", json.dumps({"ok": False}).encode())
+            return
+
+        if not self._autenticado():
+            self._enviar(401, "application/json", json.dumps({"erro": "Faça login."}).encode())
+            return
 
         if rota.startswith("/cancelar/"):
             job_id = rota.rsplit("/", 1)[-1]
@@ -1530,6 +1553,68 @@ class Handler(BaseHTTPRequestHandler):
 
         with JOBS_LOCK:
             JOBS.pop(job_id, None)
+
+
+# ----------------------------------------------------------------------------
+# Tela de login (bonita) — substitui o popup do navegador
+# ----------------------------------------------------------------------------
+LOGIN_HTML = r"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar — Baixar Músicas</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#252a34; --txt:#e8ebf0; --mut:#8b93a3; --ac:#7c5cff; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; color:var(--txt);
+         background:radial-gradient(1200px 600px at 50% -10%, #1b1f2b, var(--bg)); padding:20px; }
+  .card { width:100%; max-width:360px; background:var(--card); border:1px solid var(--line);
+          border-radius:18px; padding:34px 28px; box-shadow:0 24px 70px rgba(0,0,0,.45); }
+  .logo { font-size:42px; text-align:center; }
+  h1 { font-size:22px; text-align:center; margin:6px 0 4px; }
+  .sub { text-align:center; color:var(--mut); font-size:13px; margin:0 0 22px; }
+  label { display:block; font-size:12px; color:var(--mut); margin:14px 0 6px; }
+  input { width:100%; padding:13px 14px; border-radius:11px; border:1px solid var(--line);
+          background:#0e1016; color:var(--txt); font-size:15px; outline:none; }
+  input:focus { border-color:var(--ac); }
+  button { width:100%; margin-top:22px; padding:14px; border:0; border-radius:12px;
+           background:linear-gradient(135deg,var(--ac),#9d7bff); color:#fff; font-size:16px; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:not-allowed; }
+  .msg { text-align:center; font-size:13px; margin-top:14px; min-height:18px; color:var(--err); }
+</style>
+</head>
+<body>
+  <form class="card" id="f">
+    <div class="logo">🎵</div>
+    <h1>Baixar Músicas</h1>
+    <p class="sub">Entre para gerenciar a rádio</p>
+    <label>Usuário</label>
+    <input id="u" autocomplete="username" autofocus>
+    <label>Senha</label>
+    <input id="s" type="password" autocomplete="current-password">
+    <button id="b" type="submit">Entrar</button>
+    <div class="msg" id="m"></div>
+  </form>
+<script>
+const BASE = "{{BASE}}";
+document.getElementById("f").onsubmit = async (e) => {
+  e.preventDefault();
+  const b = document.getElementById("b"), m = document.getElementById("m");
+  b.disabled = true; b.textContent = "Entrando…"; m.textContent = "";
+  try {
+    const r = await fetch(BASE + "/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario: document.getElementById("u").value, senha: document.getElementById("s").value }) });
+    const d = await r.json();
+    if (d.ok) { location.href = BASE + "/"; }
+    else { m.textContent = "Usuário ou senha incorretos."; b.disabled = false; b.textContent = "Entrar"; }
+  } catch (err) { m.textContent = "Erro ao conectar."; b.disabled = false; b.textContent = "Entrar"; }
+};
+</script>
+</body>
+</html>
+"""
 
 
 # ----------------------------------------------------------------------------
