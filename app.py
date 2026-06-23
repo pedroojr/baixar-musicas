@@ -37,7 +37,7 @@ from urllib.parse import urlencode, urlparse
 # ----------------------------------------------------------------------------
 HOST = os.environ.get("BAIXAR_HOST", "127.0.0.1")   # 0.0.0.0 no servidor/Docker
 PORT = int(os.environ.get("BAIXAR_PORT", "8420"))
-VERSAO = "2.5"  # incrementar a cada alteração
+VERSAO = "2.6"  # incrementar a cada alteração
 # Login: se BAIXAR_SENHA estiver definida (no servidor), exige usuário+senha.
 # Local (sem a variável) continua sem senha.
 LOGIN_USUARIO = os.environ.get("BAIXAR_USUARIO", "realce")
@@ -173,6 +173,8 @@ def api_request(metodo, caminho, corpo=None):
         "X-API-Key": key,
         "Content-Type": "application/json",
         "Accept": "application/json",
+        # Sem isto, o firewall/WAF na frente da rádio bloqueia o "Python-urllib" com 403.
+        "User-Agent": "Mozilla/5.0",
     })
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -226,7 +228,8 @@ def baixar_audio_radio(estacao_id, file_id):
     """Busca o áudio de um arquivo da rádio (com a key) p/ repassar ao navegador."""
     base = (CONFIG.get("base_url") or "").rstrip("/")
     url = f"{base}/api/station/{int(estacao_id)}/file/{int(file_id)}/play"
-    req = urllib.request.Request(url, headers={"X-API-Key": CONFIG.get("api_key", "")})
+    req = urllib.request.Request(url, headers={"X-API-Key": CONFIG.get("api_key", ""),
+                                               "User-Agent": "Mozilla/5.0"})
     try:
         r = urllib.request.urlopen(req, timeout=60)
         return r.headers.get("Content-Type", "audio/mpeg"), r.read()
@@ -1180,23 +1183,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if rota == "/radio/config":
-            # Estado da configuração (não devolve a key inteira, só se existe).
-            _k = CONFIG.get("api_key", "")
-            # Teste cru: o que a API da rádio responde de DENTRO do container?
-            _apidbg = ""
-            try:
-                _req = urllib.request.Request(
-                    (CONFIG.get("base_url", "").rstrip("/")) + "/api/stations",
-                    headers={"X-API-Key": _k, "Accept": "application/json"})
-                with urllib.request.urlopen(_req, timeout=15) as _r:
-                    _apidbg = f"HTTP {_r.status} | {_r.read()[:60].decode('utf-8','ignore')}"
-            except Exception as _e:  # noqa: BLE001
-                _apidbg = "EXC: " + str(_e)[:160]
             cfg = {
-                "tem_key": bool(_k),
+                "tem_key": bool(CONFIG.get("api_key")),
                 "base_url": CONFIG.get("base_url", ""),
-                "estacoes": listar_estacoes() if _k else [],
-                "dbg": {"len": len(_k), "ini": _k[:6], "fim": _k[-6:], "tem_dp": ":" in _k, "api": _apidbg},
+                "estacoes": listar_estacoes() if CONFIG.get("api_key") else [],
             }
             self._enviar(200, "application/json", json.dumps(cfg).encode())
             return
