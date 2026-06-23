@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "baixar-musicas",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["app.py"],
+      "port": 8420
+    }
+  ]
+}

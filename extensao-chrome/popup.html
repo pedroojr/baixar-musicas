@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#252a34; --txt:#e8ebf0; --mut:#8b93a3;
+          --ac:#7c5cff; --ac2:#22c55e; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { width:340px; margin:0; padding:14px; font-family:-apple-system,system-ui,sans-serif;
+         background:var(--bg); color:var(--txt); }
+  h1 { font-size:16px; margin:0 0 10px; }
+  .sub { color:var(--mut); font-size:12px; margin:0 0 12px; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .tab { flex:1; text-align:center; padding:9px; border-radius:9px; cursor:pointer;
+         border:1px solid var(--line); background:var(--card); color:var(--mut); font-size:13px; font-weight:600; }
+  .tab.sel { color:#fff; border-color:var(--ac); background:#1a1530; }
+  .urlbox { background:#0e1016; border:1px solid var(--line); border-radius:9px; padding:8px 10px;
+            font-size:12px; color:var(--mut); word-break:break-all; max-height:48px; overflow:auto; }
+  label { display:block; font-size:12px; color:var(--mut); margin:12px 0 5px; }
+  select, input[type=text] { width:100%; padding:9px; border-radius:9px; border:1px solid var(--line);
+           background:#0e1016; color:var(--txt); font-size:13px; }
+  .seg { display:flex; gap:6px; margin-top:6px; }
+  .seg button { flex:1; padding:9px; border-radius:9px; border:1px solid var(--line);
+                background:#0e1016; color:var(--txt); font-size:13px; cursor:pointer; }
+  .seg button.sel { border-color:var(--ac); background:#1a1530; font-weight:700; }
+  .go { width:100%; margin-top:14px; padding:12px; border:0; border-radius:10px;
+        background:linear-gradient(135deg,var(--ac),#9d7bff); color:#fff; font-size:14px;
+        font-weight:700; cursor:pointer; }
+  .go:disabled { opacity:.5; cursor:not-allowed; }
+  .msg { font-size:12px; margin-top:10px; text-align:center; min-height:16px; }
+  .ok { color:var(--ac2); } .bad { color:var(--err); }
+  .hide { display:none; }
+  a { color:var(--ac); }
+  .barra { height:8px; background:#0e1016; border-radius:99px; overflow:hidden; border:1px solid var(--line); margin-top:8px; }
+  .barra > div { height:100%; width:0%; background:linear-gradient(90deg,var(--ac),var(--ac2)); transition:width .2s; }
+  .console { background:#0a0c10; border:1px solid var(--line); border-radius:8px; padding:8px; margin-top:8px;
+             height:120px; overflow:auto; font-family:ui-monospace,Menlo,monospace; font-size:11px; color:#9fb0c3; white-space:pre-wrap; }
+  .lista { margin-top:8px; max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:9px; }
+  .litem { display:flex; align-items:center; gap:7px; padding:7px 8px; border-bottom:1px solid var(--line); }
+  .litem:last-child { border-bottom:0; }
+  .litem .tit { flex:1; min-width:0; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bi { flex:0 0 auto; width:28px; height:28px; border-radius:7px; border:1px solid var(--line);
+        background:#0e1016; color:var(--txt); cursor:pointer; font-size:12px; }
+  .bi.del:hover { border-color:var(--err); color:var(--err); }
+  .vazio { color:var(--mut); font-size:12px; padding:12px; text-align:center; }
+</style>
+</head>
+<body>
+  <h1>🎵 Rádio Realce <span id="ver" style="font-size:11px;color:var(--mut);font-weight:400"></span></h1>
+
+  <div id="appOff" class="hide">
+    <p class="bad" style="font-size:13px">⚠️ O app "Baixar Músicas" não está aberto.</p>
+    <p class="sub">Abra o app e clique em "tentar de novo".</p>
+    <button class="go" id="btnRetry">Tentar de novo</button>
+  </div>
+
+  <div id="painel" class="hide">
+    <div class="tabs">
+      <div class="tab sel" id="tabEnviar">⬇️ Enviar</div>
+      <div class="tab" id="tabRadio">📻 Na Rádio</div>
+    </div>
+
+    <!-- ABA ENVIAR -->
+    <div id="abaEnviar">
+      <label>Link detectado nesta aba</label>
+      <div class="urlbox" id="url">...</div>
+      <div class="msg" id="previa" style="margin-top:6px"></div>
+      <div id="dbg" style="font-size:10px;color:#6b7280;margin-top:4px;word-break:break-all"></div>
+
+      <div id="boxEscopo" class="hide">
+        <label>O que enviar?</label>
+        <div class="seg">
+          <button data-esc="playlist" id="ePlay" class="sel">📃 Playlist inteira</button>
+          <button data-esc="musica" id="eMusica">🎵 A que está tocando</button>
+        </div>
+        <div id="tocandoInfo" class="msg hide" style="text-align:left;margin-top:6px"></div>
+        <select id="musicaSel" class="hide" style="margin-top:6px"></select>
+      </div>
+
+      <label>Para onde vai?</label>
+      <div class="seg">
+        <button data-dest="radio" id="dRadio" class="sel">📻 Rádio</button>
+        <button data-dest="local" id="dLocal">💻 Mac</button>
+      </div>
+
+      <div id="boxRadioDest">
+        <label>Estação</label>
+        <select id="estacao"></select>
+        <label>Playlist</label>
+        <select id="playlist"></select>
+      </div>
+
+      <div id="boxFormato" class="hide">
+        <label>Formato</label>
+        <div class="seg">
+          <button data-fmt="mp3" id="fMp3" class="sel">🎧 MP3</button>
+          <button data-fmt="mp4" id="fMp4">🎬 MP4</button>
+        </div>
+      </div>
+
+      <button class="go" id="btnEnviar">Enviar</button>
+      <div class="msg" id="msg"></div>
+      <div id="prog" class="hide">
+        <div id="etapaMini" style="font-size:13px;font-weight:600;margin:6px 0">⏳ Conectando…</div>
+        <div id="etapaSub" style="font-size:11px;color:var(--mut);margin-bottom:6px"></div>
+        <div class="barra"><div id="fill"></div></div>
+        <a id="toggleDet" style="font-size:11px;color:var(--mut);cursor:pointer;display:inline-block;margin-top:6px">ver detalhes</a>
+        <div class="console hide" id="console"></div>
+      </div>
+    </div>
+
+    <!-- ABA NA RÁDIO -->
+    <div id="abaRadioView" class="hide">
+      <label>Estação</label>
+      <select id="estacao2"></select>
+      <audio id="player" class="hide" controls style="width:100%;margin-top:8px"></audio>
+      <input type="text" id="buscaRadio" placeholder="🔎 buscar música na rádio..." style="margin-top:8px">
+      <div class="lista" id="listaRadio"><div class="vazio">carregando...</div></div>
+    </div>
+  </div>
+
+<script src="popup.js"></script>
+</body>
+</html>

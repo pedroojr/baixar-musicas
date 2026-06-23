@@ -1,0 +1,10 @@
+# NUNCA versionar segredos nem lixo local:
+config.json
+suno_titulos.json
+playlists_salvas.json
+cache_audio/
+vinhetas_geradas/
+__pycache__/
+*.log
+servico.log
+.DS_Store

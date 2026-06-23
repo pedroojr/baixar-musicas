@@ -1,0 +1,12 @@
+# NÃO enviar pra imagem (segredos e lixo local):
+config.json
+suno_titulos.json
+playlists_salvas.json
+cache_audio/
+vinhetas_geradas/
+__pycache__/
+*.log
+*.command
+extensao-chrome/
+.claude/
+servico.log
