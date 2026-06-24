@@ -37,13 +37,15 @@ from urllib.parse import urlencode, urlparse
 # ----------------------------------------------------------------------------
 HOST = os.environ.get("BAIXAR_HOST", "127.0.0.1")   # 0.0.0.0 no servidor/Docker
 PORT = int(os.environ.get("BAIXAR_PORT", "8420"))
-VERSAO = "2.7"  # incrementar a cada alteração
+VERSAO = "2.8"  # incrementar a cada alteração
 # Login: se BAIXAR_SENHA estiver definida (no servidor), exige usuário+senha.
 # Local (sem a variável) continua sem senha.
 LOGIN_USUARIO = os.environ.get("BAIXAR_USUARIO", "realce")
 LOGIN_SENHA = os.environ.get("BAIXAR_SENHA", "")
 EXIGE_LOGIN = bool(LOGIN_SENHA)
-SESSOES = set()  # tokens de sessão válidos (login por cookie, não popup do navegador)
+# Token de sessão ESTÁVEL (deriva da senha) — o login fica salvo mesmo se o
+# servidor reiniciar. Só muda se você trocar a senha.
+TOKEN_SESSAO = hashlib.sha256(("baixar-musicas-sessao:" + LOGIN_SENHA).encode()).hexdigest() if EXIGE_LOGIN else ""
 # Modo online: esconde "Salvar no Mac" (não faz sentido em servidor remoto).
 MODO_ONLINE = os.environ.get("BAIXAR_ONLINE", "") == "1"
 # Prefixo de caminho quando servido sob uma subpasta (ex: "/Baixar"). Vazio = raiz.
@@ -1110,7 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
         if not EXIGE_LOGIN:
             return True
         m = re.search(r"sessao=([a-f0-9]+)", self.headers.get("Cookie", ""))
-        return bool(m and m.group(1) in SESSOES)
+        return bool(m and m.group(1) == TOKEN_SESSAO)
 
     def do_GET(self):
         try:
@@ -1156,6 +1158,7 @@ class Handler(BaseHTTPRequestHandler):
         if rota == "/":
             corpo = (HTML.replace("{{VERSAO}}", VERSAO)
                          .replace("{{ONLINE}}", "1" if MODO_ONLINE else "")
+                         .replace("{{LOGIN}}", "1" if EXIGE_LOGIN else "")
                          .replace("{{BASE}}", BASE_PATH)).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1263,18 +1266,26 @@ class Handler(BaseHTTPRequestHandler):
             usr = (dados.get("usuario") or "").strip()
             pwd = dados.get("senha") or ""
             if usr == LOGIN_USUARIO and pwd == LOGIN_SENHA:
-                token = uuid.uuid4().hex
-                SESSOES.add(token)
                 corpo = json.dumps({"ok": True}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Set-Cookie",
-                                 f"sessao={token}; Path={BASE_PATH or '/'}; HttpOnly; SameSite=Lax; Max-Age=2592000")
+                                 f"sessao={TOKEN_SESSAO}; Path={BASE_PATH or '/'}; HttpOnly; SameSite=Lax; Max-Age=31536000")
                 self.send_header("Content-Length", str(len(corpo)))
                 self.end_headers()
                 self.wfile.write(corpo)
             else:
                 self._enviar(200, "application/json", json.dumps({"ok": False}).encode())
+            return
+
+        if rota == "/logout":
+            corpo = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", f"sessao=; Path={BASE_PATH or '/'}; HttpOnly; Max-Age=0")
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            self.wfile.write(corpo)
             return
 
         if not self._autenticado():
@@ -1743,7 +1754,7 @@ HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <div class="wrap">
-  <h1>🎵 Baixar Músicas <span style="font-size:13px;color:var(--mut);font-weight:400">v{{VERSAO}}</span></h1>
+  <h1>🎵 Baixar Músicas <span style="font-size:13px;color:var(--mut);font-weight:400">v{{VERSAO}}</span><a id="btnSair" class="hide" style="margin-left:auto;font-size:13px;color:var(--mut);cursor:pointer">🚪 Sair</a></h1>
   <p class="sub">Baixe playlists do YouTube ou envie direto pra rádio. Ouça antes de escolher.</p>
 
   <div class="tabs">
@@ -2221,6 +2232,16 @@ const MODO_ONLINE = "{{ONLINE}}" === "1";
 if (MODO_ONLINE) {
   document.getElementById("optLocal").style.display = "none";
   setDestino("radio");
+}
+
+// Botão Sair (só quando há login configurado).
+if ("{{LOGIN}}" === "1") {
+  const sair = document.getElementById("btnSair");
+  sair.classList.remove("hide");
+  sair.onclick = async () => {
+    try { await fetch(BASE + "/logout", { method: "POST" }); } catch (e) {}
+    location.href = BASE + "/";
+  };
 }
 
 atualizarBotao();
